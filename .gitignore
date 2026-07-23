@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+dog-breed-identification/
+dog-breed-identification.zip
+*.zip.part
+
+outputs/models/
+outputs/smoke_*/
+outputs/smoke_submission.csv
+outputs/submission*.csv
+
+*.pt
+*.pth
+*.ckpt
+train.log
