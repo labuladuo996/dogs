@@ -31,6 +31,7 @@ class Dogs(Dataset):
 
 p = argparse.ArgumentParser()
 p.add_argument("--model", choices=["resnet50", "efficientnet_b2"], default="efficientnet_b2")
+p.add_argument("--mode", choices=["basic", "strong", "full"], default="full")
 p.add_argument("--data-dir", type=Path, default=Path("dog-breed-identification"))
 p.add_argument("--split", type=Path, default=Path("outputs/data_split.csv"))
 p.add_argument("--out", type=Path, default=Path("outputs/optimized"))
@@ -57,15 +58,24 @@ size = 288 if a.model == "efficientnet_b2" else 224
 mean = (0.485, 0.456, 0.406)
 std = (0.229, 0.224, 0.225)
 
-# RandAugment 和随机擦除增加图片变化，减轻小数据集过拟合
-tfm_tr = transforms.Compose([
-    transforms.RandomResizedCrop(size, scale=(0.6, 1.0)),
-    transforms.RandomHorizontalFlip(),
-    transforms.RandAugment(num_ops=2, magnitude=9),
-    transforms.ToTensor(),
-    transforms.Normalize(mean, std),
-    transforms.RandomErasing(p=0.25, scale=(0.02, 0.15)),
-])
+# basic 使用普通增强，strong/full 加入 RandAugment 和随机擦除
+if a.mode == "basic":
+    tfm_tr = transforms.Compose([
+        transforms.RandomResizedCrop(size, scale=(0.7, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(0.2, 0.2, 0.2),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+else:
+    tfm_tr = transforms.Compose([
+        transforms.RandomResizedCrop(size, scale=(0.6, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandAugment(num_ops=2, magnitude=9),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+        transforms.RandomErasing(p=0.25, scale=(0.02, 0.15)),
+    ])
 tfm_ev = transforms.Compose([
     transforms.Resize(int(size * 1.14)),
     transforms.CenterCrop(size),
@@ -96,15 +106,16 @@ dl["train_eval"] = DataLoader(
 )
 
 # 分类头加入 Dropout，主干保留 ImageNet 预训练参数
+dropout = 0.35 if a.mode == "full" else 0.2
 if a.model == "resnet50":
     net = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
     n = net.fc.in_features
-    net.fc = nn.Sequential(nn.Dropout(0.35), nn.Linear(n, len(cls)))
+    net.fc = nn.Sequential(nn.Dropout(dropout), nn.Linear(n, len(cls)))
     head = net.fc
 else:
     net = models.efficientnet_b2(weights=models.EfficientNet_B2_Weights.DEFAULT)
     n = net.classifier[1].in_features
-    net.classifier[0] = nn.Dropout(0.35)
+    net.classifier[0] = nn.Dropout(dropout)
     net.classifier[1] = nn.Linear(n, len(cls))
     head = net.classifier
 
@@ -112,16 +123,20 @@ net = net.to(dev)
 head_ids = {id(x) for x in head.parameters()}
 backbone = [x for x in net.parameters() if id(x) not in head_ids]
 
-# 分类头学习率较高，主干使用十分之一学习率避免破坏预训练特征
-opt = torch.optim.AdamW([
-    {"params": backbone, "lr": a.lr / 10},
-    {"params": head.parameters(), "lr": a.lr},
-], weight_decay=a.wd)
+# full 使用分层学习率，其余模式保持统一学习率
+if a.mode == "full":
+    opt = torch.optim.AdamW([
+        {"params": backbone, "lr": a.lr / 10},
+        {"params": head.parameters(), "lr": a.lr},
+    ], weight_decay=a.wd)
+else:
+    opt = torch.optim.AdamW(net.parameters(), lr=a.lr / 3, weight_decay=a.wd)
 sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, a.epochs)
 loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
 scaler = torch.amp.GradScaler("cuda")
 
-save_dir = a.out / a.model
+tag = a.model if a.mode == "full" else f"{a.model}_{a.mode}"
+save_dir = a.out / tag
 save_dir.mkdir(parents=True, exist_ok=True)
 hist = []
 best = -1
@@ -137,8 +152,8 @@ for ep in range(1, a.epochs + 1):
         y = y.to(dev, non_blocking=True)
         opt.zero_grad(set_to_none=True)
 
-        # 一半批次使用 Mixup，减少模型记忆单张训练图片
-        if random.random() < 0.5:
+        # strong/full 使用 Mixup，basic 保留原始样本
+        if a.mode != "basic" and random.random() < 0.5:
             lam = np.random.beta(a.mixup, a.mixup)
             idx = torch.randperm(len(x), device=dev)
             x = lam * x + (1 - lam) * x[idx]
@@ -165,8 +180,9 @@ for ep in range(1, a.epochs + 1):
             x = x.to(dev, non_blocking=True)
             y = y.to(dev, non_blocking=True)
             with torch.autocast("cuda", dtype=torch.float16):
-                # 原图与水平翻转图取平均，降低单次裁剪带来的波动
-                z = (net(x) + net(torch.flip(x, dims=[3]))) / 2
+                z = net(x)
+                if a.mode == "full":
+                    z = (z + net(torch.flip(x, dims=[3]))) / 2
                 loss = loss_fn(z, y)
             va_loss += loss.item() * len(y)
             va_ok += (z.argmax(1) == y).sum().item()
@@ -176,7 +192,7 @@ for ep in range(1, a.epochs + 1):
     va_loss, va_acc = va_loss / va_n, va_ok / va_n
     sch.step()
     hist.append([ep, tr_loss, tr_acc, va_loss, va_acc])
-    print(f"{a.model} [{ep:02d}/{a.epochs}] train={tr_acc:.4f} val={va_acc:.4f}", flush=True)
+    print(f"{tag} [{ep:02d}/{a.epochs}] train={tr_acc:.4f} val={va_acc:.4f}", flush=True)
 
     if va_acc > best:
         best, best_ep = va_acc, ep
@@ -194,7 +210,7 @@ pd.DataFrame(
 
 ckpt = torch.load(save_dir / "best.pt", weights_only=False)
 net.load_state_dict(ckpt["state"])
-res = {"model": a.model, "best_epoch": best_ep}
+res = {"model": a.model, "mode": a.mode, "best_epoch": best_ep}
 
 for s, key in [("train_eval", "train"), ("validation", "validation"), ("test", "test")]:
     net.eval()
@@ -204,7 +220,9 @@ for s, key in [("train_eval", "train"), ("validation", "validation"), ("test", "
             x = x.to(dev, non_blocking=True)
             y = y.to(dev, non_blocking=True)
             with torch.autocast("cuda", dtype=torch.float16):
-                z = (net(x) + net(torch.flip(x, dims=[3]))) / 2
+                z = net(x)
+                if a.mode == "full":
+                    z = (z + net(torch.flip(x, dims=[3]))) / 2
                 loss = loss_fn(z, y)
             total_loss += loss.item() * len(y)
             ok += (z.argmax(1) == y).sum().item()

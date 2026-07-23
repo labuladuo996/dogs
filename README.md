@@ -86,3 +86,12 @@ python predict.py \
   --checkpoint outputs/optimized/efficientnet_b2/best.pt \
   --output outputs/submission_efficientnet_b2.csv
 ```
+
+补跑 EfficientNet-B2 消融实验：
+
+```bash
+PYTHONUNBUFFERED=1 nohup python -u run_ablation.py > ablation.log 2>&1 &
+tail -f ablation.log
+```
+
+`basic` 使用普通增强和统一学习率；`strong` 加入 RandAugment、Random Erasing 和 Mixup；已有的 `full` 进一步加入 Dropout、分层学习率和 TTA。
