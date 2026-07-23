@@ -95,3 +95,10 @@ tail -f ablation.log
 ```
 
 `basic` 使用普通增强和统一学习率；`strong` 加入 RandAugment、Random Erasing 和 Mixup；已有的 `full` 进一步加入 Dropout、分层学习率和 TTA。
+
+单独比较 TTA 前后的准确率：
+
+```bash
+python evaluate_tta.py
+cat outputs/optimized/efficientnet_b2/tta_comparison.json
+```
