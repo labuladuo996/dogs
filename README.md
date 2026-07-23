@@ -60,3 +60,29 @@ python predict.py --checkpoint outputs/models/resnet18/best.pt
 ```
 
 当前代码只负责训练、评估和预测。混淆矩阵、训练曲线、模型对比图和实验结果分析暂未加入。
+
+服务器返回的基线训练记录保存在 `results/baseline/`。其中包含三个模型的逐轮历史、最终指标和完整训练日志，不包含体积较大的模型权重。
+
+## 优化实验
+
+基线模型完成后，运行优化版 ResNet50 和 EfficientNet-B2：
+
+```bash
+PYTHONUNBUFFERED=1 nohup python -u run_optimized.py > optimized.log 2>&1 &
+tail -f optimized.log
+```
+
+优化实验使用更强数据增强、Mixup、Dropout、分层学习率和水平翻转 TTA。结果保存在：
+
+```text
+outputs/optimized/resnet50/
+outputs/optimized/efficientnet_b2/
+```
+
+使用优化模型生成提交文件：
+
+```bash
+python predict.py \
+  --checkpoint outputs/optimized/efficientnet_b2/best.pt \
+  --output outputs/submission_efficientnet_b2.csv
+```

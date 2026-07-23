@@ -36,12 +36,13 @@ a = p.parse_args()
 dev = torch.device("cuda")
 ckpt = torch.load(a.checkpoint, weights_only=False)
 cls = ckpt["classes"]
+size = ckpt.get("size", 224)
 sample = pd.read_csv(a.data_dir / "sample_submission.csv")
 
 # 使用与验证集相同的固定预处理
 tfm = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(224),
+    transforms.Resize(int(size * 1.14)),
+    transforms.CenterCrop(size),
     transforms.ToTensor(),
     transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
 ])
@@ -64,6 +65,10 @@ elif ckpt["model"] == "resnet50":
 elif ckpt["model"] == "vgg16_bn":
     net = models.vgg16_bn(weights=None)
     net.classifier[6] = nn.Linear(net.classifier[6].in_features, len(cls))
+elif ckpt["model"] == "efficientnet_b2":
+    net = models.efficientnet_b2(weights=None)
+    net.classifier[0] = nn.Dropout(0.35)
+    net.classifier[1] = nn.Linear(net.classifier[1].in_features, len(cls))
 else:
     net = models.googlenet(weights=None, init_weights=False)
     net.fc = nn.Linear(net.fc.in_features, len(cls))
@@ -79,7 +84,8 @@ pred = []
 with torch.inference_mode():
     for x in dl:
         with torch.autocast("cuda", dtype=torch.float16):
-            z = net(x.to(dev, non_blocking=True))
+            x = x.to(dev, non_blocking=True)
+            z = (net(x) + net(torch.flip(x, dims=[3]))) / 2
             z = z.logits if hasattr(z, "logits") else z
         pred.append(torch.softmax(z, 1).cpu())
 

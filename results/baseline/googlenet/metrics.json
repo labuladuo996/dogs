@@ -1,0 +1,11 @@
+{
+  "model": "googlenet",
+  "best_epoch": 16,
+  "train_loss": 1.0535041353737533,
+  "train_accuracy": 0.9672955974842767,
+  "validation_loss": 1.5347561497199949,
+  "validation_accuracy": 0.7827788649706457,
+  "test_loss": 1.5444371199825442,
+  "test_accuracy": 0.7764015645371578,
+  "minutes": 2.857960915565491
+}

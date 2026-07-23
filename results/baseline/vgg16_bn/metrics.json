@@ -1,0 +1,11 @@
+{
+  "model": "vgg16_bn",
+  "best_epoch": 17,
+  "train_loss": 0.8690479462668248,
+  "train_accuracy": 0.9977638015373864,
+  "validation_loss": 1.4751084759121849,
+  "validation_accuracy": 0.8101761252446184,
+  "test_loss": 1.5041949850017742,
+  "test_accuracy": 0.7998696219035202,
+  "minutes": 8.290896475315094
+}

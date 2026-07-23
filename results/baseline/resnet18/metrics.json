@@ -1,0 +1,11 @@
+{
+  "model": "resnet18",
+  "best_epoch": 16,
+  "train_loss": 0.9231072738235602,
+  "train_accuracy": 0.996785464709993,
+  "validation_loss": 1.7069487792560654,
+  "validation_accuracy": 0.7455968688845401,
+  "test_loss": 1.6829952798890633,
+  "test_accuracy": 0.7561929595827901,
+  "minutes": 2.6354376991589863
+}
